@@ -82,12 +82,6 @@ struct MenuBarView: View {
                     .foregroundColor(.secondary)
             }
 
-            Divider()
-
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
-            .keyboardShortcut("q")
         }
         .padding()
         .frame(width: 220)
