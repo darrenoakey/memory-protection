@@ -7,6 +7,9 @@ local/
 # macOS
 .DS_Store
 
+# Intermediate generated images
+*_raw.jpg
+
 # Xcode
 *.xcodeproj/
 *.xcworkspace/

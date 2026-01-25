@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // ##################################################################
@@ -18,9 +19,31 @@ struct MemoryProtectionApp: App {
         MenuBarExtra {
             MenuBarView(configuration: configuration, monitor: monitor)
         } label: {
-            Image(systemName: "memorychip")
+            MenuBarIcon()
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+// ##################################################################
+// MenuBarIcon
+// Custom icon loaded from app bundle resources
+struct MenuBarIcon: View {
+    var body: some View {
+        if let iconPath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "png"),
+           let nsImage = NSImage(contentsOfFile: iconPath) {
+            // Set as template image for proper light/dark mode handling
+            nsImage.isTemplate = true
+            return AnyView(
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
+            )
+        } else {
+            // Fallback to system symbol
+            return AnyView(Image(systemName: "memorychip"))
+        }
     }
 }
 

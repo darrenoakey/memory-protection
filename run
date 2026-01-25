@@ -69,11 +69,18 @@ def create_app_bundle() -> Path:
         shutil.rmtree(app_bundle)
 
     macos_dir.mkdir(parents=True)
+    resources_dir = contents_dir / "Resources"
+    resources_dir.mkdir(parents=True)
 
     # Copy executable
     executable_src = BUILD_DIR / "release" / APP_NAME
     executable_dst = macos_dir / APP_NAME
     shutil.copy2(executable_src, executable_dst)
+
+    # Copy menu bar icon
+    icon_src = RESOURCES_DIR / "MenuBarIcon.png"
+    if icon_src.exists():
+        shutil.copy2(icon_src, resources_dir / "MenuBarIcon.png")
 
     # Create Info.plist
     info_plist = contents_dir / "Info.plist"
