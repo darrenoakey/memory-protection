@@ -1,14 +1,12 @@
+![](banner.jpg)
+
 # Memory Protection
 
-A macOS menu bar app that monitors process memory usage and kills processes exceeding a configurable threshold.
+A macOS menu bar app that monitors process memory usage and automatically terminates processes that exceed a configurable threshold.
 
-## Features
+## Purpose
 
-- Sits in the menu bar with minimal footprint
-- Configurable memory threshold (default: 50GB)
-- Kills the actual offending process, not parent processes
-- Shows alert when a process is terminated
-- Runs at startup via LaunchAgent
+Memory Protection runs quietly in your menu bar and watches for runaway processes that consume excessive memory. When a process exceeds your configured limit (default: 50GB), it automatically kills the offending process and shows you an alert. This prevents your Mac from grinding to a halt when a process goes haywire.
 
 ## Installation
 
@@ -16,38 +14,59 @@ A macOS menu bar app that monitors process memory usage and kills processes exce
 ./run install
 ```
 
-This will:
-1. Build the app (if needed)
-2. Install to ~/Applications
-3. Set up auto-start via LaunchAgent
-4. Start the app
+This builds the app, installs it to `~/Applications`, configures it to start automatically at login, and launches it immediately.
 
-## Commands
+## Usage
 
+### Menu Bar Controls
+
+Click the Memory Protection icon in your menu bar to:
+- View and change the memory threshold
+- See the current monitoring status
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `./run build` | Build the app |
+| `./run install` | Build, install, and set up auto-start |
+| `./run uninstall` | Remove the app and auto-start configuration |
+| `./run start` | Start the app |
+| `./run stop` | Stop the app |
+| `./run status` | Show whether the app is running |
+
+### Examples
+
+**Install and start monitoring:**
 ```bash
-./run build      # Build the app
-./run install    # Build, install, and set up auto-start
-./run uninstall  # Remove app and auto-start
-./run start      # Start the app
-./run stop       # Stop the app
-./run status     # Show running status
+./run install
 ```
 
-## How It Works
+**Check if the app is running:**
+```bash
+./run status
+```
 
-The app polls all processes every 5 seconds and checks their physical memory footprint. When a process exceeds the threshold, it uses the "leaf offender" algorithm:
+**Stop monitoring temporarily:**
+```bash
+./run stop
+```
 
-1. Build a process tree (parent-child relationships)
-2. Find all processes over the threshold
-3. Kill only "leaf offenders" - processes over threshold with no descendants also over threshold
+**Restart monitoring:**
+```bash
+./run start
+```
 
-This ensures that if Python uses 75GB and Terminal shows 90GB (because it's the parent), only Python gets killed - not Terminal.
+**Completely remove the app:**
+```bash
+./run uninstall
+```
 
-## Configuration
-
-Click the menu bar icon to change the memory threshold. The setting persists across restarts.
+**Force a rebuild and reinstall:**
+```bash
+./run install --force
+```
 
 ## Requirements
 
 - macOS 13.0 or later
-- Swift 5.9 or later
