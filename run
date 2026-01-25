@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+# ##################################################################
+# paths relative to this script, not cwd
+SCRIPT_DIR = Path(__file__).parent.resolve()
+SRC_DIR = SCRIPT_DIR / "src" / "MemoryProtection"
+OUTPUT_DIR = SCRIPT_DIR / "output"
+BUILD_DIR = SRC_DIR / ".build"
+RESOURCES_DIR = SCRIPT_DIR / "resources"
+
+APP_NAME = "MemoryProtection"
+APP_BUNDLE_NAME = f"{APP_NAME}.app"
+INSTALL_DIR = Path.home() / "Applications"
+LAUNCH_AGENT_DIR = Path.home() / "Library" / "LaunchAgents"
+LAUNCH_AGENT_LABEL = "com.user.memoryprotection"
+LAUNCH_AGENT_PLIST = f"{LAUNCH_AGENT_LABEL}.plist"
+
+# ##################################################################
+# run_cmd
+# executes a shell command and returns the result
+def run_cmd(cmd: list[str], check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
+    print(f"  -> {' '.join(cmd)}")
+    return subprocess.run(cmd, check=check, capture_output=capture, text=True)
+
+# ##################################################################
+# get_latest_mtime
+# recursively find the most recent modification time in a directory
+def get_latest_mtime(path: Path, extensions: list[str] | None = None) -> float:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_mtime
+    latest = 0
+    for item in path.rglob("*"):
+        if item.is_file():
+            if extensions is None or item.suffix in extensions:
+                latest = max(latest, item.stat().st_mtime)
+    return latest
+
+# ##################################################################
+# needs_rebuild
+# check if source files are newer than the built product
+def needs_rebuild() -> bool:
+    product_path = BUILD_DIR / "release" / APP_NAME
+    if not product_path.exists():
+        return True
+    product_mtime = product_path.stat().st_mtime
+    source_mtime = get_latest_mtime(SRC_DIR / "Sources", extensions=[".swift"])
+    package_mtime = (SRC_DIR / "Package.swift").stat().st_mtime if (SRC_DIR / "Package.swift").exists() else 0
+    return source_mtime > product_mtime or package_mtime > product_mtime
+
+# ##################################################################
+# create_app_bundle
+# wrap the executable in a macOS app bundle structure
+def create_app_bundle() -> Path:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    app_bundle = OUTPUT_DIR / APP_BUNDLE_NAME
+    contents_dir = app_bundle / "Contents"
+    macos_dir = contents_dir / "MacOS"
+
+    # Clean and recreate
+    if app_bundle.exists():
+        shutil.rmtree(app_bundle)
+
+    macos_dir.mkdir(parents=True)
+
+    # Copy executable
+    executable_src = BUILD_DIR / "release" / APP_NAME
+    executable_dst = macos_dir / APP_NAME
+    shutil.copy2(executable_src, executable_dst)
+
+    # Create Info.plist
+    info_plist = contents_dir / "Info.plist"
+    info_plist.write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>{APP_NAME}</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.user.memoryprotection</string>
+    <key>CFBundleName</key>
+    <string>{APP_NAME}</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
+''')
+
+    return app_bundle
+
+# ##################################################################
+# command_build
+# build the swift package and create app bundle
+def command_build(args: argparse.Namespace) -> int:
+    print("Checking if build is needed...")
+    if not needs_rebuild() and not args.force:
+        print("Build is up to date, skipping.")
+        app_bundle = OUTPUT_DIR / APP_BUNDLE_NAME
+        if not app_bundle.exists():
+            print("Creating app bundle...")
+            create_app_bundle()
+        return 0
+
+    print("Building MemoryProtection...")
+    result = run_cmd([
+        "swift", "build",
+        "-c", "release",
+        "--package-path", str(SRC_DIR)
+    ], check=False)
+
+    if result.returncode != 0:
+        print("Build failed!")
+        return result.returncode
+
+    print("Creating app bundle...")
+    create_app_bundle()
+    print(f"Build complete: {OUTPUT_DIR / APP_BUNDLE_NAME}")
+    return 0
+
+# ##################################################################
+# needs_install
+# check if installed app is older than built app
+def needs_install() -> bool:
+    built_app = OUTPUT_DIR / APP_BUNDLE_NAME / "Contents" / "MacOS" / APP_NAME
+    installed_app = INSTALL_DIR / APP_BUNDLE_NAME / "Contents" / "MacOS" / APP_NAME
+
+    if not built_app.exists():
+        return True
+    if not installed_app.exists():
+        return True
+
+    return built_app.stat().st_mtime > installed_app.stat().st_mtime
+
+# ##################################################################
+# install_launch_agent
+# install and load the launch agent
+def install_launch_agent() -> bool:
+    LAUNCH_AGENT_DIR.mkdir(parents=True, exist_ok=True)
+    plist_src = RESOURCES_DIR / LAUNCH_AGENT_PLIST
+    plist_dst = LAUNCH_AGENT_DIR / LAUNCH_AGENT_PLIST
+
+    installed_app_path = INSTALL_DIR / APP_BUNDLE_NAME / "Contents" / "MacOS" / APP_NAME
+
+    # Read template and substitute path
+    template = plist_src.read_text()
+    content = template.replace("__APP_PATH__", str(installed_app_path))
+
+    # Check if update needed
+    if plist_dst.exists():
+        existing = plist_dst.read_text()
+        if existing == content:
+            print("Launch agent is up to date.")
+            return False
+
+    plist_dst.write_text(content)
+    print(f"Installed launch agent: {plist_dst}")
+    return True
+
+# ##################################################################
+# command_install
+# build, install to ~/Applications, set up launch agent
+def command_install(args: argparse.Namespace) -> int:
+    # First build
+    build_result = command_build(args)
+    if build_result != 0:
+        return build_result
+
+    # Stop if running
+    command_stop(args)
+
+    # Install app
+    print("Checking if install is needed...")
+    if needs_install() or args.force:
+        print(f"Installing to {INSTALL_DIR}...")
+        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+        installed_app = INSTALL_DIR / APP_BUNDLE_NAME
+        if installed_app.exists():
+            shutil.rmtree(installed_app)
+        shutil.copytree(OUTPUT_DIR / APP_BUNDLE_NAME, installed_app)
+        print(f"Installed: {installed_app}")
+    else:
+        print("App is up to date, skipping install.")
+
+    # Install launch agent
+    print("Setting up launch agent...")
+    agent_updated = install_launch_agent()
+
+    # Load launch agent
+    plist_path = LAUNCH_AGENT_DIR / LAUNCH_AGENT_PLIST
+
+    # Unload first if already loaded
+    run_cmd(["launchctl", "unload", str(plist_path)], check=False)
+
+    # Load
+    run_cmd(["launchctl", "load", str(plist_path)], check=False)
+
+    print("Installation complete! App is running.")
+    return 0
+
+# ##################################################################
+# command_uninstall
+# remove app and launch agent
+def command_uninstall(args: argparse.Namespace) -> int:
+    print("Uninstalling MemoryProtection...")
+
+    # Unload launch agent
+    plist_path = LAUNCH_AGENT_DIR / LAUNCH_AGENT_PLIST
+    if plist_path.exists():
+        run_cmd(["launchctl", "unload", str(plist_path)], check=False)
+        plist_path.unlink()
+        print(f"Removed: {plist_path}")
+
+    # Remove app
+    installed_app = INSTALL_DIR / APP_BUNDLE_NAME
+    if installed_app.exists():
+        shutil.rmtree(installed_app)
+        print(f"Removed: {installed_app}")
+
+    print("Uninstall complete.")
+    return 0
+
+# ##################################################################
+# command_start
+# start the app
+def command_start(args: argparse.Namespace) -> int:
+    installed_app = INSTALL_DIR / APP_BUNDLE_NAME
+    if not installed_app.exists():
+        print("App not installed. Run './run install' first.")
+        return 1
+
+    run_cmd(["open", str(installed_app)])
+    print("Started MemoryProtection.")
+    return 0
+
+# ##################################################################
+# command_stop
+# stop the running app
+def command_stop(args: argparse.Namespace) -> int:
+    result = run_cmd(["pkill", "-x", APP_NAME], check=False)
+    if result.returncode == 0:
+        print("Stopped MemoryProtection.")
+    return 0
+
+# ##################################################################
+# command_status
+# show running status
+def command_status(args: argparse.Namespace) -> int:
+    # Check if running
+    result = run_cmd(["pgrep", "-x", APP_NAME], check=False, capture=True)
+    if result.returncode == 0:
+        pids = result.stdout.strip().split("\n")
+        print(f"MemoryProtection is running (PID: {', '.join(pids)})")
+    else:
+        print("MemoryProtection is not running.")
+
+    # Check if installed
+    installed_app = INSTALL_DIR / APP_BUNDLE_NAME
+    if installed_app.exists():
+        print(f"Installed at: {installed_app}")
+    else:
+        print("Not installed.")
+
+    # Check launch agent
+    plist_path = LAUNCH_AGENT_DIR / LAUNCH_AGENT_PLIST
+    if plist_path.exists():
+        print(f"Launch agent: {plist_path}")
+    else:
+        print("Launch agent not installed.")
+
+    return 0
+
+# ##################################################################
+# main
+# parse arguments and dispatch to command handler
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        description="Memory Protection - build and install tool"
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    # build
+    p_build = sub.add_parser("build", help="Build the app")
+    p_build.add_argument("-f", "--force", action="store_true", help="Force rebuild")
+    p_build.set_defaults(func=command_build)
+
+    # install
+    p_install = sub.add_parser("install", help="Build, install, and set up auto-start")
+    p_install.add_argument("-f", "--force", action="store_true", help="Force reinstall")
+    p_install.set_defaults(func=command_install)
+
+    # uninstall
+    p_uninstall = sub.add_parser("uninstall", help="Remove app and auto-start")
+    p_uninstall.set_defaults(func=command_uninstall)
+
+    # start
+    p_start = sub.add_parser("start", help="Start the app")
+    p_start.set_defaults(func=command_start)
+
+    # stop
+    p_stop = sub.add_parser("stop", help="Stop the app")
+    p_stop.set_defaults(func=command_stop)
+
+    # status
+    p_status = sub.add_parser("status", help="Show running status")
+    p_status.set_defaults(func=command_status)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+# ##################################################################
+# entry point
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
