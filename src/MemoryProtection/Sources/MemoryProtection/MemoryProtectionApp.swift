@@ -32,14 +32,11 @@ struct MenuBarIcon: View {
     var body: some View {
         if let iconPath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "png"),
            let nsImage = NSImage(contentsOfFile: iconPath) {
+            // Set size to match standard menu bar icons (16x16 points)
+            nsImage.size = NSSize(width: 16, height: 16)
             // Set as template image for proper light/dark mode handling
             nsImage.isTemplate = true
-            return AnyView(
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 18, height: 18)
-            )
+            return AnyView(Image(nsImage: nsImage))
         } else {
             // Fallback to system symbol
             return AnyView(Image(systemName: "memorychip"))
