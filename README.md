@@ -70,3 +70,7 @@ Click the Memory Protection icon in your menu bar to:
 ## Requirements
 
 - macOS 13.0 or later
+
+## License
+
+This project is licensed under [CC BY-NC 4.0](https://darren-static.waft.dev) - free to use and modify, but no commercial use without permission.
